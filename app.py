@@ -130,8 +130,8 @@ DATA_SOURCES = [
 
 st.set_page_config(
     layout="wide",
-    page_title="Brand Surge Analytics",
-    page_icon="📊",
+    page_title="brandsurge.ai",
+    page_icon="⚡",
     initial_sidebar_state="expanded"
 )
 
@@ -572,7 +572,17 @@ def render_sidebar(brand_list: List[str]) -> Dict[str, Any]:
         Dictionary of selected filter values
     """
     with st.sidebar:
-        st.markdown("<h1 style='text-align: center;'>Brand ⚡ Surge</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: center; margin-left: 0; margin-right: 0;'>Brand ⚡ Surge</h1>", unsafe_allow_html=True)
+        st.markdown("---")
+        
+        # Brand selector - moved above navigation
+        st.markdown("### Brand Selection")
+        selected_brand = st.selectbox(
+            "Select Brand",
+            options=brand_list,
+            key="brand_selector"
+        )
+        
         st.markdown("---")
         
         # Navigation (static for now)
@@ -596,16 +606,6 @@ def render_sidebar(brand_list: List[str]) -> Dict[str, Any]:
         
         st.markdown("---")
         
-        # Brand selector
-        st.markdown("### Brand Selection")
-        selected_brand = st.selectbox(
-            "Select Brand",
-            options=brand_list,
-            key="brand_selector"
-        )
-        
-        st.markdown("---")
-        
         # Date range filter
         st.markdown("### Date Range")
         date_range = st.date_input(
@@ -614,21 +614,12 @@ def render_sidebar(brand_list: List[str]) -> Dict[str, Any]:
             key="date_range"
         )
         
-        # Metric selector for charts
-        st.markdown("### Chart Metric")
-        metric_selector = st.selectbox(
-            "Channel Performance Metric",
-            options=["Mentions", "Views", "Engagement", "Estimated Views"],
-            key="metric_selector"
-        )
-        
         st.markdown("---")
         st.markdown("*Data updates every hour*")
     
     return {
         'selected_brand': selected_brand,
-        'date_range': date_range,
-        'metric': metric_selector
+        'date_range': date_range
     }
 
 
@@ -1300,37 +1291,58 @@ def main():
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Main charts section (without detailed channel metrics table)
+    # Main charts section - Enhanced Channel Performance
     st.markdown("---")
     st.markdown("### 📈 Performance Overview")
     
+    # First row - Channel Performance Metrics (2 columns)
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("#### Channel Performance")
+        st.markdown("#### Channel Mentions & Engagement")
         
         if len(df_brand) > 0 and 'Source' in df_brand.columns:
-            channel_counts = df_brand['Source'].value_counts().head(10)
+            # Aggregate data by channel
+            channel_data = df_brand.groupby('Source').agg({
+                'Sentiment': 'count',  # Mentions
+                'Engagement': 'sum' if 'Engagement' in df_brand.columns else 'count'
+            }).reset_index()
+            channel_data.columns = ['Channel', 'Mentions', 'Total_Engagement']
+            channel_data = channel_data.sort_values('Mentions', ascending=False).head(10)
             
-            fig = px.bar(
-                x=channel_counts.values,
-                y=channel_counts.index,
-                orientation='h',
-                title=f'Top Channels by {filters["metric"].title()}',
-                labels={'x': filters['metric'].title(), 'y': 'Channel'},
-                color=channel_counts.values,
-                color_continuous_scale='Purples'
-            )
+            # Create grouped bar chart
+            fig = go.Figure()
+            
+            fig.add_trace(go.Bar(
+                name='Mentions',
+                x=channel_data['Channel'],
+                y=channel_data['Mentions'],
+                marker_color='#8b5cf6',
+                text=channel_data['Mentions'],
+                textposition='auto'
+            ))
+            
+            fig.add_trace(go.Bar(
+                name='Total Engagement',
+                x=channel_data['Channel'],
+                y=channel_data['Total_Engagement'],
+                marker_color='#3b82f6',
+                text=channel_data['Total_Engagement'].apply(lambda x: f'{x:,.0f}'),
+                textposition='auto',
+                yaxis='y2'
+            ))
             
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='#f1f5f9'),
-                showlegend=False,
                 height=400,
                 margin=dict(l=20, r=20, t=40, b=20),
-                xaxis=dict(gridcolor='#334155'),
-                yaxis=dict(gridcolor='#334155')
+                xaxis=dict(gridcolor='#334155', title='Channel'),
+                yaxis=dict(gridcolor='#334155', title='Mentions', side='left'),
+                yaxis2=dict(gridcolor='#334155', title='Total Engagement', side='right', overlaying='y'),
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                barmode='group'
             )
             
             st.plotly_chart(fig, use_container_width=True)
@@ -1338,41 +1350,90 @@ def main():
             st.info("No channel data available")
     
     with col2:
-        st.markdown("#### Geographic Sentiment")
+        st.markdown("#### Channel Reach & Views")
         
-        if len(df_brand) > 0 and 'Country' in df_brand.columns:
-            geo_data = df_brand.groupby('Country').agg({
-                'sentiment_score': 'mean',
-                'Sentiment': 'count'
+        if len(df_brand) > 0 and 'Source' in df_brand.columns:
+            # Aggregate reach and views by channel
+            channel_reach = df_brand.groupby('Source').agg({
+                'Reach': 'sum' if 'Reach' in df_brand.columns else 'count',
+                'Views': 'sum' if 'Views' in df_brand.columns else 'count'
             }).reset_index()
-            geo_data.columns = ['Country', 'Avg_Sentiment', 'Mentions']
-            geo_data = geo_data[geo_data['Country'] != 'Unknown'].sort_values('Mentions', ascending=False).head(15)
+            channel_reach.columns = ['Channel', 'Total_Reach', 'Total_Views']
+            channel_reach = channel_reach.sort_values('Total_Reach', ascending=False).head(10)
             
-            fig = px.bar(
-                geo_data,
-                x='Country',
-                y='Avg_Sentiment',
-                color='Avg_Sentiment',
-                title='Average Sentiment by Country',
-                color_continuous_scale=['#ef4444', '#fbbf24', '#10b981'],
-                color_continuous_midpoint=0,
-                hover_data={'Mentions': True}
-            )
+            # Create grouped bar chart
+            fig = go.Figure()
+            
+            fig.add_trace(go.Bar(
+                name='Total Reach',
+                x=channel_reach['Channel'],
+                y=channel_reach['Total_Reach'],
+                marker_color='#10b981',
+                text=channel_reach['Total_Reach'].apply(lambda x: f'{x:,.0f}'),
+                textposition='auto'
+            ))
+            
+            fig.add_trace(go.Bar(
+                name='Total Views',
+                x=channel_reach['Channel'],
+                y=channel_reach['Total_Views'],
+                marker_color='#fbbf24',
+                text=channel_reach['Total_Views'].apply(lambda x: f'{x:,.0f}'),
+                textposition='auto'
+            ))
             
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='#f1f5f9'),
-                showlegend=False,
                 height=400,
                 margin=dict(l=20, r=20, t=40, b=20),
-                xaxis=dict(gridcolor='#334155', tickangle=45),
-                yaxis=dict(gridcolor='#334155')
+                xaxis=dict(gridcolor='#334155', title='Channel'),
+                yaxis=dict(gridcolor='#334155', title='Count'),
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                barmode='group'
             )
             
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("No geographic data available")
+            st.info("No channel data available")
+    
+    # Second row - Geographic Sentiment (full width)
+    st.markdown("#### Geographic Sentiment Distribution")
+    
+    if len(df_brand) > 0 and 'Country' in df_brand.columns:
+        geo_data = df_brand.groupby('Country').agg({
+            'sentiment_score': 'mean',
+            'Sentiment': 'count'
+        }).reset_index()
+        geo_data.columns = ['Country', 'Avg_Sentiment', 'Mentions']
+        geo_data = geo_data[geo_data['Country'] != 'Unknown'].sort_values('Mentions', ascending=False).head(15)
+        
+        fig = px.bar(
+            geo_data,
+            x='Country',
+            y='Avg_Sentiment',
+            color='Avg_Sentiment',
+            title='Average Sentiment by Country',
+            color_continuous_scale=['#ef4444', '#fbbf24', '#10b981'],
+            color_continuous_midpoint=0,
+            hover_data={'Mentions': True}
+        )
+        
+        fig.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#f1f5f9'),
+            showlegend=False,
+            height=400,
+            margin=dict(l=20, r=20, t=40, b=20),
+            xaxis=dict(gridcolor='#334155', tickangle=45),
+            yaxis=dict(gridcolor='#334155')
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No geographic data available")
     
     st.markdown("<br>", unsafe_allow_html=True)
     
