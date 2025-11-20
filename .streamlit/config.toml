@@ -1,0 +1,27 @@
+# Streamlit Configuration for Brand Analytics Dashboard
+# Dark theme matching modern analytics UI with navy/charcoal background
+
+[theme]
+# Primary color for interactive elements (bright purple/blue accent)
+primaryColor = "#8b5cf6"
+
+# Main background color (dark navy/charcoal)
+backgroundColor = "#0f172a"
+
+# Secondary background color for containers and cards (slightly lighter)
+secondaryBackgroundColor = "#1e293b"
+
+# Text color (light gray/white for readability)
+textColor = "#f1f5f9"
+
+# Font family
+font = "sans serif"
+
+[server]
+# Enable CORS for development
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+# Collect usage stats
+gatherUsageStats = false
