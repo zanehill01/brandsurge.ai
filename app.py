@@ -544,12 +544,18 @@ def compute_metrics(df_brand: pd.DataFrame, df_all: pd.DataFrame) -> Dict[str, A
     
     # Marketing Health Score (composite: 0-100)
     # Formula: 0.4 * sentiment_index + 0.3 * normalized_engagement + 0.3 * normalized_reach
-    if len(df_brand) > 0:
-        max_engagement = df_all['Engagement'].max() if 'Engagement' in df_all.columns else 1
-        max_reach = df_all['Reach'].max() if 'Reach' in df_all.columns else 1
+    if len(df_brand) > 0 and len(df_all) > 0:
+        # Calculate average engagement and reach across all brands for fair comparison
+        all_brands_avg_engagement = df_all['Engagement'].mean() if 'Engagement' in df_all.columns else 1
+        all_brands_avg_reach = df_all['Reach'].mean() if 'Reach' in df_all.columns else 1
         
-        norm_engagement = (metrics['avg_engagement'] / max_engagement * 100) if max_engagement > 0 else 0
-        norm_reach = (metrics['total_reach'] / max_reach * 100) if max_reach > 0 else 0
+        # Normalize brand's avg engagement against overall avg (capped at 100)
+        norm_engagement = min(100, (metrics['avg_engagement'] / all_brands_avg_engagement * 100)) if all_brands_avg_engagement > 0 else 0
+        
+        # Calculate average reach per mention for the brand
+        brand_avg_reach = (metrics['total_reach'] / metrics['total_mentions']) if metrics['total_mentions'] > 0 else 0
+        # Normalize brand's avg reach against overall avg (capped at 100)
+        norm_reach = min(100, (brand_avg_reach / all_brands_avg_reach * 100)) if all_brands_avg_reach > 0 else 0
         
         metrics['health_score'] = (0.4 * metrics['sentiment_index'] + 
                                    0.3 * norm_engagement + 
@@ -623,120 +629,249 @@ def render_sidebar(brand_list: List[str]) -> Dict[str, Any]:
     }
 
 
-def render_kpis(metrics: Dict[str, Any], df_brand: pd.DataFrame):
+def render_kpis(metrics: Dict[str, Any], df_brand: pd.DataFrame, df_all: pd.DataFrame, selected_brand: str):
     """Render top KPI row with gauge visualizations and keywords block."""
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.markdown("#### Sentiment Index")
-        fig_sentiment = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=metrics['sentiment_index'],
-            domain={'x': [0, 1], 'y': [0, 1]},
-            number={'font': {'color': '#f1f5f9', 'size': 32}},
-            gauge={
-                'axis': {'range': [0, 100], 'tickcolor': '#f1f5f9'},
-                'bar': {'color': '#10b981'},
-                'bgcolor': '#1e293b',
-                'borderwidth': 2,
-                'bordercolor': '#334155',
-                'steps': [
-                    {'range': [0, 33], 'color': '#ef4444'},
-                    {'range': [33, 66], 'color': '#fbbf24'},
-                    {'range': [66, 100], 'color': '#10b981'}
-                ],
-                'threshold': {
-                    'line': {'color': '#f1f5f9', 'width': 4},
-                    'thickness': 0.75,
-                    'value': metrics['sentiment_index']
-                }
-            }
-        ))
+        
+        # Calculate daily sentiment scores for line chart
+        if len(df_brand) > 0 and 'Date' in df_brand.columns:
+            daily_sentiment = df_brand.groupby(df_brand['Date'].dt.date)['sentiment_score'].mean()
+            daily_sentiment_index = ((daily_sentiment + 1) / 2) * 100
+            
+            fig_sentiment = go.Figure()
+            
+            # Add line trace with gradient fill
+            fig_sentiment.add_trace(go.Scatter(
+                x=daily_sentiment_index.index,
+                y=daily_sentiment_index.values,
+                mode='lines+markers',
+                name='Sentiment Index',
+                line=dict(color='#10b981', width=3),
+                marker=dict(size=6, color='#10b981', symbol='circle'),
+                fill='tozeroy',
+                fillcolor='rgba(16, 185, 129, 0.2)',
+                hovertemplate='<b>%{x}</b><br>Sentiment: %{y:.1f}/100<extra></extra>'
+            ))
+            
+            # Add current value annotation
+            fig_sentiment.add_annotation(
+                x=daily_sentiment_index.index[-1],
+                y=daily_sentiment_index.values[-1],
+                text=f"<b>{metrics['sentiment_index']:.1f}</b>",
+                showarrow=False,
+                font=dict(size=16, color='#10b981', family='Arial Black'),
+                xshift=0,
+                yshift=20,
+                bgcolor='rgba(16, 185, 129, 0.1)',
+                bordercolor='#10b981',
+                borderwidth=2,
+                borderpad=4
+            )
+        else:
+            # Fallback bar for current value only
+            fig_sentiment = go.Figure(go.Bar(
+                x=['Current'],
+                y=[metrics['sentiment_index']],
+                marker=dict(color='#10b981'),
+                text=[f"{metrics['sentiment_index']:.1f}"],
+                textposition='auto',
+                textfont=dict(size=20, color='#f1f5f9')
+            ))
         
         fig_sentiment.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
             font={'color': '#f1f5f9'},
             height=200,
-            margin=dict(l=20, r=20, t=0, b=0)
+            margin=dict(l=10, r=10, t=10, b=30),
+            xaxis=dict(
+                showgrid=False,
+                showline=False,
+                zeroline=False,
+                color='#94a3b8'
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor='#334155',
+                range=[0, 100],
+                showline=False,
+                zeroline=False,
+                color='#94a3b8'
+            ),
+            showlegend=False
         )
         
         st.plotly_chart(fig_sentiment, use_container_width=True)
     
     with col2:
         st.markdown("#### Trend Velocity")
-        # Normalize trend velocity to 0-100 scale for gauge display
-        # Map -100% to 100% range to 0-100 gauge scale
-        normalized_velocity = min(100, max(0, (metrics['trend_velocity'] + 100) / 2))
         
-        fig_velocity = go.Figure(go.Indicator(
-            mode="gauge+number+delta",
-            value=metrics['trend_velocity'],
-            domain={'x': [0, 1], 'y': [0, 1]},
-            number={'suffix': '%', 'font': {'color': '#f1f5f9', 'size': 32}},
-            delta={'reference': 0, 'increasing': {'color': '#10b981'}, 'decreasing': {'color': '#ef4444'}},
-            gauge={
-                'axis': {'range': [-100, 100], 'tickcolor': '#f1f5f9'},
-                'bar': {'color': '#8b5cf6'},
-                'bgcolor': '#1e293b',
-                'borderwidth': 2,
-                'bordercolor': '#334155',
-                'steps': [
-                    {'range': [-100, -33], 'color': '#ef4444'},
-                    {'range': [-33, 33], 'color': '#fbbf24'},
-                    {'range': [33, 100], 'color': '#10b981'}
-                ],
-                'threshold': {
-                    'line': {'color': '#f1f5f9', 'width': 4},
-                    'thickness': 0.75,
-                    'value': metrics['trend_velocity']
-                }
-            }
-        ))
+        # Calculate daily engagement trend for velocity visualization
+        if len(df_brand) > 0 and 'Date' in df_brand.columns and 'Engagement' in df_brand.columns:
+            daily_engagement = df_brand.groupby(df_brand['Date'].dt.date)['Engagement'].sum()
+            
+            # Calculate rolling percentage change
+            if len(daily_engagement) > 1:
+                velocity_trend = daily_engagement.pct_change(fill_method=None).fillna(0) * 100
+                
+                fig_velocity = go.Figure()
+                
+                # Add area chart with color based on positive/negative
+                colors = ['#10b981' if v >= 0 else '#ef4444' for v in velocity_trend.values]
+                
+                fig_velocity.add_trace(go.Scatter(
+                    x=velocity_trend.index,
+                    y=velocity_trend.values,
+                    mode='lines',
+                    name='Velocity',
+                    line=dict(color='#8b5cf6', width=3),
+                    fill='tozeroy',
+                    fillcolor='rgba(139, 92, 246, 0.3)',
+                    hovertemplate='<b>%{x}</b><br>Change: %{y:.1f}%<extra></extra>'
+                ))
+                
+                # Add zero line
+                fig_velocity.add_hline(
+                    y=0, 
+                    line_dash="dash", 
+                    line_color="#94a3b8", 
+                    line_width=1,
+                    opacity=0.5
+                )
+                
+                # Add current value annotation
+                fig_velocity.add_annotation(
+                    x=velocity_trend.index[-1],
+                    y=velocity_trend.values[-1],
+                    text=f"<b>{metrics['trend_velocity']:.1f}%</b>",
+                    showarrow=False,
+                    font=dict(size=16, color='#8b5cf6', family='Arial Black'),
+                    xshift=0,
+                    yshift=20 if metrics['trend_velocity'] >= 0 else -20,
+                    bgcolor='rgba(139, 92, 246, 0.1)',
+                    bordercolor='#8b5cf6',
+                    borderwidth=2,
+                    borderpad=4
+                )
+            else:
+                # Single bar fallback
+                fig_velocity = go.Figure(go.Bar(
+                    x=['Current'],
+                    y=[metrics['trend_velocity']],
+                    marker=dict(color='#8b5cf6'),
+                    text=[f"{metrics['trend_velocity']:.1f}%"],
+                    textposition='auto',
+                    textfont=dict(size=20, color='#f1f5f9')
+                ))
+        else:
+            # Fallback bar for current value only
+            fig_velocity = go.Figure(go.Bar(
+                x=['Current'],
+                y=[metrics['trend_velocity']],
+                marker=dict(color='#8b5cf6'),
+                text=[f"{metrics['trend_velocity']:.1f}%"],
+                textposition='auto',
+                textfont=dict(size=20, color='#f1f5f9')
+            ))
         
         fig_velocity.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
             font={'color': '#f1f5f9'},
             height=200,
-            margin=dict(l=20, r=20, t=0, b=0)
+            margin=dict(l=10, r=10, t=10, b=30),
+            xaxis=dict(
+                showgrid=False,
+                showline=False,
+                zeroline=False,
+                color='#94a3b8'
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor='#334155',
+                showline=False,
+                zeroline=False,
+                color='#94a3b8'
+            ),
+            showlegend=False
         )
         
         st.plotly_chart(fig_velocity, use_container_width=True)
     
     with col3:
         st.markdown("#### Share of Voice")
-        fig_sov = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=metrics['share_of_voice'],
-            domain={'x': [0, 1], 'y': [0, 1]},
-            number={'suffix': '%', 'font': {'color': '#f1f5f9', 'size': 32}},
-            gauge={
-                'axis': {'range': [0, 100], 'tickcolor': '#f1f5f9'},
-                'bar': {'color': '#3b82f6'},
-                'bgcolor': '#1e293b',
-                'borderwidth': 2,
-                'bordercolor': '#334155',
-                'steps': [
-                    {'range': [0, 25], 'color': '#334155'},
-                    {'range': [25, 50], 'color': '#475569'},
-                    {'range': [50, 75], 'color': '#64748b'},
-                    {'range': [75, 100], 'color': '#94a3b8'}
-                ],
-                'threshold': {
-                    'line': {'color': '#f1f5f9', 'width': 4},
-                    'thickness': 0.75,
-                    'value': metrics['share_of_voice']
-                }
-            }
-        ))
+        
+        # Calculate share of voice over time for selected brand (monthly aggregation)
+        if len(df_brand) > 0 and 'Date' in df_brand.columns and 'brand' in df_all.columns:
+            # Group by month and calculate monthly share of voice
+            df_all_with_date = df_all[df_all['Date'].notna()].copy()
+            
+            # Create month-year column for grouping
+            df_brand_copy = df_brand.copy()
+            df_brand_copy['Month'] = df_brand_copy['Date'].dt.to_period('M')
+            df_all_with_date['Month'] = df_all_with_date['Date'].dt.to_period('M')
+            
+            # Get monthly mention counts for selected brand and all brands
+            monthly_brand_mentions = df_brand_copy.groupby('Month').size()
+            monthly_total_mentions = df_all_with_date.groupby('Month').size()
+            
+            # Calculate monthly share of voice percentage
+            monthly_sov = (monthly_brand_mentions / monthly_total_mentions * 100).fillna(0)
+            
+            # Convert period index to string for plotting
+            months_str = [str(m) for m in monthly_sov.index]
+            
+            fig_sov = go.Figure()
+            
+            # Add vertical bar chart showing monthly share of voice
+            fig_sov.add_trace(go.Bar(
+                x=months_str,
+                y=monthly_sov.values,
+                marker=dict(
+                    color='#3b82f6',
+                    line=dict(color='#1e293b', width=1)
+                ),
+                hovertemplate='<b>%{x}</b><br>Share of Voice: %{y:.1f}%<extra></extra>',
+                showlegend=False
+            ))
+            
+        else:
+            # Fallback: show current share of voice as single bar
+            fig_sov = go.Figure(go.Bar(
+                x=['Current'],
+                y=[metrics['share_of_voice']],
+                marker=dict(color='#3b82f6'),
+                text=[f"{metrics['share_of_voice']:.1f}%"],
+                textposition='outside',
+                textfont=dict(size=14, color='#f1f5f9')
+            ))
         
         fig_sov.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
             font={'color': '#f1f5f9'},
             height=200,
-            margin=dict(l=20, r=20, t=0, b=0)
+            margin=dict(l=10, r=10, t=10, b=30),
+            xaxis=dict(
+                showgrid=False,
+                showline=False,
+                zeroline=False,
+                color='#94a3b8',
+                title=''
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor='#334155',
+                range=[0, max(100, monthly_sov.max() * 1.1) if 'monthly_sov' in locals() and len(monthly_sov) > 0 else 100],
+                showline=False,
+                zeroline=False,
+                color='#94a3b8',
+                ticksuffix='%'
+            ),
+            showlegend=False
         )
         
         st.plotly_chart(fig_sov, use_container_width=True)
@@ -1287,13 +1422,13 @@ def main():
     st.markdown("---")
     
     # Top KPI row with keywords
-    render_kpis(metrics, df_brand)
+    render_kpis(metrics, df_brand, df_all, filters['selected_brand'])
     
     st.markdown("<br>", unsafe_allow_html=True)
     
     # Main charts section - Enhanced Channel Performance
     st.markdown("---")
-    st.markdown("### 📈 Performance Overview")
+    st.markdown("### Performance Overview")
     
     # First row - Channel Performance Metrics (2 columns)
     col1, col2 = st.columns(2)
@@ -1310,7 +1445,7 @@ def main():
             channel_data.columns = ['Channel', 'Mentions', 'Total_Engagement']
             channel_data = channel_data.sort_values('Mentions', ascending=False).head(10)
             
-            # Create grouped bar chart
+            # Create bar chart with line overlay
             fig = go.Figure()
             
             fig.add_trace(go.Bar(
@@ -1318,17 +1453,17 @@ def main():
                 x=channel_data['Channel'],
                 y=channel_data['Mentions'],
                 marker_color='#8b5cf6',
-                text=channel_data['Mentions'],
-                textposition='auto'
+                hovertemplate='<b>%{x}</b><br>Mentions: %{y:,.0f}<extra></extra>'
             ))
             
-            fig.add_trace(go.Bar(
+            fig.add_trace(go.Scatter(
                 name='Total Engagement',
                 x=channel_data['Channel'],
                 y=channel_data['Total_Engagement'],
-                marker_color='#3b82f6',
-                text=channel_data['Total_Engagement'].apply(lambda x: f'{x:,.0f}'),
-                textposition='auto',
+                mode='lines+markers',
+                line=dict(color='#3b82f6', width=3, dash='dot'),
+                marker=dict(size=8, color='#3b82f6'),
+                hovertemplate='<b>%{x}</b><br>Total Engagement: %{y:,.0f}<extra></extra>',
                 yaxis='y2'
             ))
             
@@ -1341,8 +1476,7 @@ def main():
                 xaxis=dict(gridcolor='#334155', title='Channel'),
                 yaxis=dict(gridcolor='#334155', title='Mentions', side='left'),
                 yaxis2=dict(gridcolor='#334155', title='Total Engagement', side='right', overlaying='y'),
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-                barmode='group'
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
             )
             
             st.plotly_chart(fig, use_container_width=True)
@@ -1350,18 +1484,17 @@ def main():
             st.info("No channel data available")
     
     with col2:
-        st.markdown("#### Channel Reach & Views")
+        st.markdown("#### Channel Reach")
         
         if len(df_brand) > 0 and 'Source' in df_brand.columns:
-            # Aggregate reach and views by channel
+            # Aggregate reach by channel
             channel_reach = df_brand.groupby('Source').agg({
-                'Reach': 'sum' if 'Reach' in df_brand.columns else 'count',
-                'Views': 'sum' if 'Views' in df_brand.columns else 'count'
+                'Reach': 'sum' if 'Reach' in df_brand.columns else 'count'
             }).reset_index()
-            channel_reach.columns = ['Channel', 'Total_Reach', 'Total_Views']
+            channel_reach.columns = ['Channel', 'Total_Reach']
             channel_reach = channel_reach.sort_values('Total_Reach', ascending=False).head(10)
             
-            # Create grouped bar chart
+            # Create bar chart
             fig = go.Figure()
             
             fig.add_trace(go.Bar(
@@ -1369,17 +1502,7 @@ def main():
                 x=channel_reach['Channel'],
                 y=channel_reach['Total_Reach'],
                 marker_color='#10b981',
-                text=channel_reach['Total_Reach'].apply(lambda x: f'{x:,.0f}'),
-                textposition='auto'
-            ))
-            
-            fig.add_trace(go.Bar(
-                name='Total Views',
-                x=channel_reach['Channel'],
-                y=channel_reach['Total_Views'],
-                marker_color='#fbbf24',
-                text=channel_reach['Total_Views'].apply(lambda x: f'{x:,.0f}'),
-                textposition='auto'
+                hovertemplate='<b>%{x}</b><br>Total Reach: %{y:,.0f}<extra></extra>'
             ))
             
             fig.update_layout(
@@ -1389,9 +1512,8 @@ def main():
                 height=400,
                 margin=dict(l=20, r=20, t=40, b=20),
                 xaxis=dict(gridcolor='#334155', title='Channel'),
-                yaxis=dict(gridcolor='#334155', title='Count'),
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-                barmode='group'
+                yaxis=dict(gridcolor='#334155', title='Total Reach'),
+                showlegend=False
             )
             
             st.plotly_chart(fig, use_container_width=True)
@@ -1437,21 +1559,46 @@ def main():
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Live Metrics Section
-    st.markdown("### 📊 Live Metrics")
-    st.markdown("---")
+    # Live Metrics Section - Unique formatting
+    st.markdown("""
+        <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); 
+                    border-radius: 12px; 
+                    padding: 20px; 
+                    border-left: 4px solid #8b5cf6; 
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3); 
+                    margin-bottom: 20px;">
+            <h3 style="margin: 0; color: #f1f5f9; font-weight: 700;">Live Metrics</h3>
+            <p style="margin: 5px 0 0 0; color: #94a3b8; font-size: 0.9rem;">Real-time performance indicators</p>
+        </div>
+    """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("#### Real-time KPIs")
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); 
+                        border-radius: 10px; 
+                        padding: 15px; 
+                        border-left: 3px solid #3b82f6; 
+                        margin-bottom: 10px;">
+                <p style="margin: 0; color: #94a3b8; font-size: 0.85rem; font-weight: 600;">REAL-TIME KPIs</p>
+            </div>
+        """, unsafe_allow_html=True)
         st.metric("Total Mentions", f"{metrics['total_mentions']:,}")
         st.metric("Total Reach", f"{metrics['total_reach']:,.0f}")
         st.metric("Avg Engagement", f"{metrics['avg_engagement']:,.1f}")
         st.metric("Health Score", f"{metrics['health_score']:.1f}/100")
     
     with col2:
-        st.markdown("#### Sentiment Distribution")
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); 
+                        border-radius: 10px; 
+                        padding: 15px; 
+                        border-left: 3px solid #10b981; 
+                        margin-bottom: 10px;">
+                <p style="margin: 0; color: #94a3b8; font-size: 0.85rem; font-weight: 600;">SENTIMENT DISTRIBUTION</p>
+            </div>
+        """, unsafe_allow_html=True)
         if len(df_brand) > 0 and 'Sentiment' in df_brand.columns:
             sentiment_dist = df_brand['Sentiment'].value_counts()
             fig_sentiment = go.Figure(data=[go.Pie(
@@ -1464,18 +1611,53 @@ def main():
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='#f1f5f9'),
-                height=300,
-                margin=dict(t=20, b=20, l=20, r=20),
+                height=280,
+                margin=dict(t=10, b=10, l=10, r=10),
                 showlegend=True
             )
             st.plotly_chart(fig_sentiment, use_container_width=True, key="live_sentiment")
     
     with col3:
-        st.markdown("#### Top Sources")
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); 
+                        border-radius: 10px; 
+                        padding: 15px; 
+                        border-left: 3px solid #fbbf24; 
+                        margin-bottom: 10px;">
+                <p style="margin: 0; color: #94a3b8; font-size: 0.85rem; font-weight: 600;">TOP SOURCES</p>
+            </div>
+        """, unsafe_allow_html=True)
         if len(df_brand) > 0 and 'Source' in df_brand.columns:
             top_sources = df_brand['Source'].value_counts().head(5)
             for idx, (source, count) in enumerate(top_sources.items(), 1):
-                st.markdown(f"**{idx}. {source}:** {count:,} mentions")
+                # Single color for all sources - blue
+                color = '#3b82f6'
+                st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); 
+                                border-radius: 8px; 
+                                padding: 12px 15px; 
+                                margin: 8px 0; 
+                                border-left: 3px solid {color}; 
+                                display: flex; 
+                                justify-content: space-between; 
+                                align-items: center;">
+                        <div>
+                            <span style="background: {color}; 
+                                        color: #ffffff; 
+                                        padding: 2px 8px; 
+                                        border-radius: 4px; 
+                                        font-size: 0.75rem; 
+                                        font-weight: 700; 
+                                        margin-right: 10px;">#{idx}</span>
+                            <span style="color: #f1f5f9; 
+                                        font-weight: 600; 
+                                        font-size: 0.95rem;">{source}</span>
+                        </div>
+                        <span style="color: #94a3b8; 
+                                    font-weight: 600; 
+                                    font-size: 0.9rem;">{count:,}</span>
+                    </div>
+                """, unsafe_allow_html=True)
     
     st.markdown("<br>", unsafe_allow_html=True)
     
