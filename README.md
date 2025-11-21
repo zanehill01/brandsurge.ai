@@ -1,2 +1,2 @@
 # brandsurge.ai
-Development Environment for Dashboard To Present to BrandBrand
+Development Environment for Dashboard to Present to BrandBrand
