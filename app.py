@@ -1558,18 +1558,8 @@ def main():
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Live Metrics Section - Unique formatting
-    st.markdown("""
-        <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); 
-                    border-radius: 12px; 
-                    padding: 20px; 
-                    border-left: 4px solid #8b5cf6; 
-                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3); 
-                    margin-bottom: 20px;">
-            <h3 style="margin: 0; color: #f1f5f9; font-weight: 700;">Live Metrics</h3>
-            <p style="margin: 5px 0 0 0; color: #94a3b8; font-size: 0.9rem;">Real-time performance indicators</p>
-        </div>
-    """, unsafe_allow_html=True)
+    # Live Metrics Section
+    st.markdown("### Live Metrics")
     
     col1, col2, col3 = st.columns(3)
     
