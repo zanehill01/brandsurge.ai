@@ -98,29 +98,25 @@ DATA_SOURCES = [
         "type": "csv",
         "brand": "Lockheed Martin"
     },
-    
-    # JSON files (place all JSON files in data/json/)
     {
-        "path": f"{JSON_DIR}/nike_sample.json",
-        "type": "json",
-        "brand": "Nike"  # Use None if brand is in JSON data
+        "path": f"{CSV_DIR}/Microsoft_sample_large.csv",
+        "type": "csv",
+        "brand": "Microsoft"
     },
     {
-        "path": f"{JSON_DIR}/adidas_sample.json",
-        "type": "json",
+        "path": f"{CSV_DIR}/Palantir_sample_large.csv",
+        "type": "csv",
+        "brand": "Palantir"
+    },
+    {
+        "path": f"{CSV_DIR}/Adidas_sample_large.csv",
+        "type": "csv",
         "brand": "Adidas"
     },
-    
-    # Meltwater API data (nested structure - will be transformed)
     {
-        "path": f"{JSON_DIR}/meltwaterdataset1.json",
-        "type": "meltwater",
-        "brand": "Coca-Cola"
-    },
-    {
-        "path": f"{JSON_DIR}/meltwaterdataset2.json",
-        "type": "meltwater",
-        "brand": "Coca-Cola"
+        "path": f"{CSV_DIR}/Nike_sample_large.csv",
+        "type": "csv",
+        "brand": "Nike"
     },
 ]
 
@@ -405,20 +401,18 @@ def load_data(sources: List[Dict[str, Any]]) -> pd.DataFrame:
             # Normalize column names (strip whitespace, handle case)
             df.columns = df.columns.str.strip()
             
-            # Add brand column if not present
-            if 'brand' not in df.columns and 'Brand' not in df.columns:
-                if brand_name:
-                    df['brand'] = brand_name
-                else:
-                    # Infer from filename
-                    filename = Path(path).stem
-                    df['brand'] = filename.split(' - ')[0] if ' - ' in filename else filename
-            elif 'Brand' in df.columns:
+            # Handle brand column based on config
+            if 'Brand' in df.columns:
                 df.rename(columns={'Brand': 'brand'}, inplace=True)
             
-            # If brand_name is specified in config, override
+            # Only set brand if brand_name is explicitly specified in config
+            # If brand_name is None, leave brand column alone (will be extracted later in prepare_data)
             if brand_name:
                 df['brand'] = brand_name
+            elif 'brand' not in df.columns:
+                # If no brand column exists and brand_name is None, 
+                # don't infer - let prepare_data handle it
+                pass
             
             all_dfs.append(df)
             
@@ -479,6 +473,11 @@ def prepare_data(df: pd.DataFrame) -> pd.DataFrame:
     
     if 'Country' in df.columns:
         df['Country'] = df['Country'].fillna('Unknown')
+    
+    # Extract brand from 'Input Name' column if 'brand' column doesn't exist
+    if 'brand' not in df.columns and 'Input Name' in df.columns:
+        # Extract brand name from patterns like "Microsoft + AI" -> "Microsoft"
+        df['brand'] = df['Input Name'].str.split(' + ').str[0]
     
     return df
 
@@ -616,12 +615,12 @@ def render_sidebar(brand_list: List[str]) -> Dict[str, Any]:
         st.markdown("### Date Range")
         date_range = st.date_input(
             "Select Date Range",
-            value=(datetime.now() - timedelta(days=30), datetime.now()),
+            value=(datetime.now() - timedelta(days=90), datetime.now()),
             key="date_range"
         )
         
         st.markdown("---")
-        st.markdown("*Data updates every hour*")
+        st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 0.85rem;'><em>Data updates every hour</em></p>", unsafe_allow_html=True)
     
     return {
         'selected_brand': selected_brand,
@@ -1575,30 +1574,14 @@ def main():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("""
-            <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); 
-                        border-radius: 10px; 
-                        padding: 15px; 
-                        border-left: 3px solid #3b82f6; 
-                        margin-bottom: 10px;">
-                <p style="margin: 0; color: #94a3b8; font-size: 0.85rem; font-weight: 600;">REAL-TIME KPIs</p>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #f1f5f9; font-size: 1.1rem; font-weight: 700; margin-bottom: 15px;'>REAL-TIME KPIs</p>", unsafe_allow_html=True)
         st.metric("Total Mentions", f"{metrics['total_mentions']:,}")
         st.metric("Total Reach", f"{metrics['total_reach']:,.0f}")
         st.metric("Avg Engagement", f"{metrics['avg_engagement']:,.1f}")
         st.metric("Health Score", f"{metrics['health_score']:.1f}/100")
     
     with col2:
-        st.markdown("""
-            <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); 
-                        border-radius: 10px; 
-                        padding: 15px; 
-                        border-left: 3px solid #10b981; 
-                        margin-bottom: 10px;">
-                <p style="margin: 0; color: #94a3b8; font-size: 0.85rem; font-weight: 600;">SENTIMENT DISTRIBUTION</p>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #f1f5f9; font-size: 1.1rem; font-weight: 700; margin-bottom: 15px;'>SENTIMENT DISTRIBUTION</p>", unsafe_allow_html=True)
         if len(df_brand) > 0 and 'Sentiment' in df_brand.columns:
             sentiment_dist = df_brand['Sentiment'].value_counts()
             fig_sentiment = go.Figure(data=[go.Pie(
@@ -1618,15 +1601,7 @@ def main():
             st.plotly_chart(fig_sentiment, use_container_width=True, key="live_sentiment")
     
     with col3:
-        st.markdown("""
-            <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); 
-                        border-radius: 10px; 
-                        padding: 15px; 
-                        border-left: 3px solid #fbbf24; 
-                        margin-bottom: 10px;">
-                <p style="margin: 0; color: #94a3b8; font-size: 0.85rem; font-weight: 600;">TOP SOURCES</p>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #f1f5f9; font-size: 1.1rem; font-weight: 700; margin-bottom: 15px;'>TOP SOURCES</p>", unsafe_allow_html=True)
         if len(df_brand) > 0 and 'Source' in df_brand.columns:
             top_sources = df_brand['Source'].value_counts().head(5)
             for idx, (source, count) in enumerate(top_sources.items(), 1):
