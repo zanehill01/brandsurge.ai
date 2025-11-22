@@ -126,7 +126,7 @@ DATA_SOURCES = [
 
 st.set_page_config(
     layout="wide",
-    page_title="brandsurge.ai",
+    page_title="brandbrand.ai",
     page_icon="⚡",
     initial_sidebar_state="expanded"
 )
@@ -577,7 +577,7 @@ def render_sidebar(brand_list: List[str]) -> Dict[str, Any]:
         Dictionary of selected filter values
     """
     with st.sidebar:
-        st.markdown("<h1 style='text-align: center; margin-left: 0; margin-right: 0;'>Brand ⚡ Surge</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: center; margin-left: 0; margin-right: 0;'>Brand ⚡ Brand</h1>", unsafe_allow_html=True)
         st.markdown("---")
         
         # Brand selector - moved above navigation
